@@ -2,6 +2,7 @@ import org.gradle.internal.jvm.Jvm
 import proguard.gradle.ProGuardTask
 
 apply plugin: 'java'
+apply plugin: 'maven-publish'
 
 configurations {
     // adapted from https://android.googlesource.com/platform/frameworks/testing/+/976c423/espresso/espresso-lib/build.gradle
@@ -86,6 +87,20 @@ jar {
     exclude { entry ->
         sourceSets.main.output.files*.absolutePath.any {
             entry.file.absolutePath.startsWith it
+        }
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            library(MavenPublication) {
+                groupId = 'streem.bumptech.glide'
+                artifactId = 'compiler'
+                version = '1.0.0'
+
+                from component
+            }
         }
     }
 }
