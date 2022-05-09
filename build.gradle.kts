@@ -1,96 +1,25 @@
-import io.github.gradlenexus.publishplugin.NexusPublishExtension
+import com.amazonaws.auth.AWSSessionCredentials
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.publish.maven.MavenPublication
 import com.google.common.base.CaseFormat
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 
-
 plugins {
     kotlin("android") version "1.4.31" apply false
     id("com.android.library") version "4.1.1" apply false
-
-    id("io.github.gradle-nexus.publish-plugin") version "1.1.0"
+    id("maven-publish")
 }
 
-val sonatypeApiUser = providers.gradlePropertyOrEnvironmentVariable("sonatypeApiUser")
-val sonatypeApiKey = providers.gradlePropertyOrEnvironmentVariable("sonatypeApiKey")
-if (sonatypeApiUser.isPresent && sonatypeApiKey.isPresent) {
-    configure<NexusPublishExtension> {
-        repositories {
-            sonatype {
-                nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
-                snapshotRepositoryUrl.set(uri("https://s01.oss.sonatype.org/content/repositories/snapshots/"))
-                username.set(sonatypeApiUser)
-                password.set(sonatypeApiKey)
-            }
-        }
-    }
-} else {
-    logger.info("Sonatype API key not defined, skipping configuration of Maven Central publishing repository")
-}
-
-fun MavenPublication.configureGlidePom(pomDescription: String) {
-    val pomName = artifactId
-    pom {
-        name.set(pomName)
-        description.set(pomDescription)
-        url.set("https://github.com/streem/glide")
-
-        licenses {
-            license {
-                name.set("Apache License, Version 2.0")
-                url.set("https://opensource.org/licenses/Apache-2.0")
-            }
-        }
-
-        organization {
-            name.set("Streem, LLC")
-            url.set("https://github.com/streem")
-        }
-
-        developers {
-            developer {
-                id.set("streem")
-                name.set("Streem, LLC")
-                url.set("https://github.com/streem")
-            }
-        }
-
-        scm {
-            connection.set("scm:git:git@github.com:streem/glide.git")
-            developerConnection.set("scm:git:git@github.com:streem/glide.git")
-            url.set("git@github.com:streem/glide.git")
-        }
-    }
-}
-
-@Suppress("UnstableApiUsage")
-fun ProviderFactory.gradlePropertyOrEnvironmentVariable(propertyName: String): Provider<String> {
-    val envVariableName = CaseFormat.LOWER_CAMEL.to(CaseFormat.UPPER_UNDERSCORE, propertyName)
-    return gradleProperty(propertyName)
-            .forUseAtConfigurationTime()
-            .orElse(environmentVariable(envVariableName).forUseAtConfigurationTime())
-}
-
-val signingKeyAsciiArmored = providers.gradlePropertyOrEnvironmentVariable("signingKeyAsciiArmored")
-if (signingKeyAsciiArmored.isPresent) {
-    subprojects {
-        plugins.withType<SigningPlugin> {
-            configure<SigningExtension> {
-                @Suppress("UnstableApiUsage")
-                useInMemoryPgpKeys(signingKeyAsciiArmored.get(), "")
-                sign(extensions.getByType<PublishingExtension>().publications)
-            }
-        }
-    }
-} else {
-    logger.info("PGP signing key not defined, skipping signing configuration")
-}
+val awsCredentials = runCatching { DefaultAWSCredentialsProviderChain().credentials }
+        .onFailure { logger.warn("Could not load AWS credentials. Publishing will be disabled. Error: ${it.message}") }
+        .getOrNull()
 
 buildscript {
     repositories {
         mavenLocal()
+        mavenCentral()
         jcenter()
         google()
         gradlePluginPortal()
@@ -116,6 +45,7 @@ subprojects { project ->
 
     repositories {
         google()
+        mavenLocal()
         mavenCentral()
         maven {
             url "https://oss.sonatype.org/content/repositories/snapshots"
@@ -147,11 +77,11 @@ subprojects { project ->
     def isDisallowedProject =
     project.name in ["third_party", "gif_decoder", "gif_encoder", "disklrucache", "glide"]
     if (!isDisallowedProject) {
-        apply plugin: "com.diffplug.spotless"
+        apply plugin : "com.diffplug.spotless"
 
         spotless {
             java {
-                target fileTree('.') {
+                target fileTree ('.') {
                     include '**/*.java'
                     exclude '**/resources/**'
                     exclude '**/build/**'
@@ -161,7 +91,7 @@ subprojects { project ->
         }
     }
 
-    apply plugin: 'checkstyle'
+    apply plugin : 'checkstyle'
 
     checkstyle {
         toolVersion = '8.5'
@@ -172,7 +102,7 @@ subprojects { project ->
         configProperties.checkStyleConfigDir = rootProject.rootDir
     }
 
-    task checkstyle(type: Checkstyle) {
+    task checkstyle (type: Checkstyle) {
     source 'src'
     include '**/*.java'
     exclude '**/gen/**'
@@ -183,21 +113,42 @@ subprojects { project ->
     classpath = files()
 }
 
-    apply plugin: "se.bjurr.violations.violations-gradle-plugin"
+    apply plugin : "se.bjurr.violations.violations-gradle-plugin"
 
-    task violations(type: ViolationsTask) {
+    task violations (type: ViolationsTask) {
     minSeverity 'INFO'
     detailLevel 'VERBOSE'
     maxViolations = 0
     diffMaxViolations = 0
 
     // Formats are listed here: https://github.com/tomasbjerre/violations-lib
-    def dir = projectDir.absolutePath
+    def dir = projectDir . absolutePath
             violations = [
-        ["PMD",         dir, ".*/pmd/.*\\.xml\$",        "PMD"],
-        ["ANDROIDLINT", dir, ".*/lint-results\\.xml\$",  "AndroidLint"],
-        ["CHECKSTYLE",  dir, ".*/checkstyle/.*\\.xml\$", "Checkstyle"],
+        ["PMD", dir, ".*/pmd/.*\\.xml\$", "PMD"],
+        ["ANDROIDLINT", dir, ".*/lint-results\\.xml\$", "AndroidLint"],
+        ["CHECKSTYLE", dir, ".*/checkstyle/.*\\.xml\$", "Checkstyle"],
     ]
+}
+
+    if (awsCredentials != null) {
+        plugins.withType<MavenPublishPlugin> {
+            configure<PublishingExtension> {
+                repositories {
+                    maven {
+                        name = "streem"
+                        setUrl("s3://maven.streem.com.s3.us-west-2.amazonaws.com/")
+                        credentials(AwsCredentials::class) {
+                            DefaultAWSCredentialsProviderChain().credentials.let {
+                                accessKey = it.awsAccessKeyId
+                                secretKey = it.awsSecretKey
+                                sessionToken = (it as? AWSSessionCredentials)?.sessionToken
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
     afterEvaluate {
@@ -232,4 +183,12 @@ subprojects { project ->
             }
         }
     }
+}
+//TODO change to compiler
+// Publishing the StreemSDK will also trigger publishing the AraasSDK, which it depends on.
+tasks.register("publish").configure {
+dependsOn(gradle.includedBuild("compiler").task(":Compiler:publishCompilerPublicationToStreemRepository"))
+}
+tasks.register("publishToMavenLocal").configure {
+dependsOn(gradle.includedBuild("compiler").task(":Compiler:publishCompilerPublicationToMavenLocal"))
 }

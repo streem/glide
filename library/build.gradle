@@ -72,7 +72,7 @@ afterEvaluate {
             library(MavenPublication) {
                 groupId = 'streem.bumptech.glide'
                 artifactId = 'library'
-                version = '1.0.0'
+                version = '4.11.0'
 
                 from component
             }
